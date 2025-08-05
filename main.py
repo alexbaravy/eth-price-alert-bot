@@ -31,6 +31,31 @@ dp = Dispatcher()
 user_ids = set()  # Множество ID пользователей для рассылки
 last_eth_price = None
 last_notification_price = None
+USERS_FILE = "users.json"  # Файл для хранения пользователей
+
+def save_users():
+    """Сохранение списка пользователей в файл"""
+    try:
+        with open(USERS_FILE, 'w') as f:
+            json.dump(list(user_ids), f)
+        logger.debug(f"Сохранено {len(user_ids)} пользователей в {USERS_FILE}")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения пользователей: {e}")
+
+def load_users():
+    """Загрузка списка пользователей из файла"""
+    global user_ids
+    try:
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, 'r') as f:
+                loaded_users = json.load(f)
+                user_ids = set(loaded_users)
+                logger.info(f"Загружено {len(user_ids)} пользователей из {USERS_FILE}")
+        else:
+            logger.info("Файл пользователей не найден, начинаем с пустого списка")
+    except Exception as e:
+        logger.error(f"Ошибка загрузки пользователей: {e}")
+        user_ids = set()
 
 
 class EthereumPriceTracker:
@@ -71,16 +96,31 @@ price_tracker = EthereumPriceTracker()
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     """Обработчик команды /start"""
-    user_ids.add(message.from_user.id)
-    await message.answer(
-        "🚀 Добро пожаловать в бот отслеживания курса Ethereum!\n\n"
-        "📊 Я буду уведомлять вас об изменениях курса ETH каждые $50.\n"
-        "⏰ Проверка курса происходит каждые 5 минут.\n\n"
-        "Доступные команды:\n"
-        "/price - показать текущий курс\n"
-        "/status - статус бота\n"
-        "/stop - остановить уведомления"
-    )
+    user_id = message.from_user.id
+
+    if user_id not in user_ids:
+        user_ids.add(user_id)
+        save_users()  # Сохраняем после добавления нового пользователя
+        welcome_text = (
+            "🚀 Добро пожаловать в бот отслеживания курса Ethereum!\n\n"
+            "📊 Я буду уведомлять вас об изменениях курса ETH каждые $50.\n"
+            "⏰ Проверка курса происходит каждые 5 минут.\n\n"
+            "Доступные команды:\n"
+            "/price - показать текущий курс\n"
+            "/status - статус бота\n"
+            "/stop - остановить уведомления"
+        )
+    else:
+        welcome_text = (
+            "👋 С возвращением! Вы уже подписаны на уведомления.\n\n"
+            "📊 Продолжаю отслеживать курс Ethereum для вас.\n\n"
+            "Доступные команды:\n"
+            "/price - показать текущий курс\n"
+            "/status - статус бота\n"
+            "/stop - остановить уведомления"
+        )
+
+    await message.answer(welcome_text)
 
 
 @dp.message(lambda message: message.text == "/price")
@@ -119,8 +159,13 @@ async def status_handler(message: Message):
 @dp.message(lambda message: message.text == "/stop")
 async def stop_handler(message: Message):
     """Обработчик команды /stop"""
-    user_ids.discard(message.from_user.id)
-    await message.answer("❌ Вы отписались от уведомлений о курсе Ethereum.")
+    user_id = message.from_user.id
+    if user_id in user_ids:
+        user_ids.discard(user_id)
+        save_users()  # Сохраняем после удаления пользователя
+        await message.answer("❌ Вы отписались от уведомлений о курсе Ethereum.")
+    else:
+        await message.answer("ℹ️ Вы не были подписаны на уведомления.")
 
 
 async def send_price_notification(price, change):
@@ -139,14 +184,21 @@ async def send_price_notification(price, change):
     )
 
     # Отправляем уведомление всем пользователям
+    failed_users = set()
     for user_id in user_ids.copy():  # Копируем множество для безопасной итерации
         try:
             await bot.send_message(user_id, message_text)
         except Exception as e:
             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
             # Удаляем пользователя, если бот заблокирован
-            if "bot was blocked" in str(e).lower():
-                user_ids.discard(user_id)
+            if "bot was blocked" in str(e).lower() or "user is deactivated" in str(e).lower():
+                failed_users.add(user_id)
+
+                # Удаляем заблокировавших пользователей и сохраняем изменения
+            if failed_users:
+                user_ids -= failed_users
+                save_users()
+                logger.info(f"Удалено {len(failed_users)} неактивных пользователей")
 
 
 async def price_monitoring():
@@ -191,6 +243,9 @@ async def main():
     """Главная функция"""
     logger.info("Запуск Telegram бота...")
     logger.info(f"Настройки: интервал проверки = {CHECK_INTERVAL}с, порог уведомлений = ${PRICE_THRESHOLD}")
+
+    # Загружаем список пользователей при запуске
+    load_users()
 
     # Запускаем мониторинг курса в фоне
     monitoring_task = asyncio.create_task(price_monitoring())

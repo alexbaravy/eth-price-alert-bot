@@ -55,7 +55,7 @@ Thumbs.db
 *.log
 logs/
 
-# User data files (if implementing file storage)
+# User data files
 users.json
 *.db
 *.sqlite
