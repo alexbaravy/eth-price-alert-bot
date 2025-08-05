@@ -31,7 +31,7 @@ dp = Dispatcher()
 user_ids = set()  # Множество ID пользователей для рассылки
 last_eth_price = None
 last_notification_price = None
-USERS_FILE = "users.json"  # Файл для хранения пользователей
+USERS_FILE = os.path.join(os.getenv("DATA_DIR", "."), "users.json")  # Файл для хранения пользователей
 
 def save_users():
     """Сохранение списка пользователей в файл"""
