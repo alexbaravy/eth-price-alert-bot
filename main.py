@@ -169,6 +169,7 @@ async def stop_handler(message: Message):
 
 
 async def send_price_notification(price, change):
+    global user_ids
     """Отправка уведомления всем пользователям"""
     if not user_ids:
         return
